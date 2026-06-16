@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "phage-agent",
+    "phage-worker",
+    "phage-proto",
+    "phage-server"
+]
+resolver = "2"
