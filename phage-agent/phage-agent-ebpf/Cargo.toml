@@ -1,0 +1,17 @@
+[package]
+name = "phage-agent-ebpf"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+phage-agent-common = { path = "../phage-agent-common" }
+
+aya-ebpf = { workspace = true }
+aya-log-ebpf = { workspace = true }
+
+[build-dependencies]
+which = { workspace = true }
+
+[[bin]]
+name = "phage-agent"
+path = "src/main.rs"
