@@ -5,4 +5,4 @@ members = [
     "phage-proto",
     "phage-server"
 ]
-resolver = "2"
+resolver = "3"
