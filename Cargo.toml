@@ -7,6 +7,7 @@ members = [
 ]
 resolver = "3"
 
+
 [workspace.package]
 edition = "2024"
 license = "AGPL-3"
@@ -38,3 +39,9 @@ tonic = "0.14.6"
 debug = 2
 codegen-units = 1
 strip = false
+
+[profile.release]
+panic = "abort"
+
+[profile.dev]
+panic = "abort"

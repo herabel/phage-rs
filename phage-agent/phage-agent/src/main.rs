@@ -1,4 +1,3 @@
-use aya::{Btf, programs::BtfTracePoint};
 #[rustfmt::skip]
 use log::{debug, warn};
 use tokio::signal;
@@ -43,10 +42,11 @@ async fn main() -> anyhow::Result<()> {
             });
         }
     }
-    let btf = Btf::from_sys_fs()?;
-    let program: &mut BtfTracePoint = ebpf.program_mut("sys_enter_execve").unwrap().try_into()?;
-    program.load("sys_enter_execve", &btf)?;
-    program.attach()?;
+    // let btf = Btf::from_sys_fs()?;
+    let program: &mut aya::programs::TracePoint = ebpf.program_mut("sys_enter_write").unwrap().try_into()?;
+    program.load()?;
+//   program.attach("syscalls", "sys_enter_execve")?;
+    program.attach("syscalls", "sys_enter_write")?;
 
     let ctrl_c = signal::ctrl_c();
     println!("Waiting for Ctrl-C...");
