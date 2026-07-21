@@ -42,15 +42,25 @@ async fn main() -> anyhow::Result<()> {
             });
         }
     }
-    // let btf = Btf::from_sys_fs()?;
-    let program: &mut aya::programs::TracePoint = ebpf.program_mut("sys_enter_write").unwrap().try_into()?;
-    program.load()?;
-//   program.attach("syscalls", "sys_enter_execve")?;
-    program.attach("syscalls", "sys_enter_write")?;
 
-    let ctrl_c = signal::ctrl_c();
-    println!("Waiting for Ctrl-C...");
-    ctrl_c.await?;
+    let targets = vec![
+        ("sys_enter_execve", "syscalls", "sys_enter_execve"),
+        ("sys_enter_write", "syscalls", "sys_enter_write"),
+        ("sys_enter_openat", "syscalls", "sys_enter_openat"),
+    ];
+
+    for (prog_name, category, syscall_name) in targets {
+        let program: &mut aya::programs::TracePoint = ebpf
+            .program_mut(prog_name)
+            .ok_or_else(|| anyhow::anyhow!("Program '{}' not found in BPF binary", prog_name))?
+            .try_into()?;
+
+        program.load()?;
+        program.attach(category, syscall_name)?;
+        println!("Successfully attached tracepoint: {}", syscall_name);
+    }
+    println!("All targets attached. Waiting for Ctrl-C...");
+    signal::ctrl_c().await?;
     println!("Exiting...");
 
     Ok(())

@@ -1,5 +1,3 @@
-#![no_std]
-#![no_main]
 use aya_ebpf::{
     helpers::{bpf_get_current_comm, bpf_get_current_pid_tgid},
 };
