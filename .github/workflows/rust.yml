@@ -21,6 +21,8 @@ jobs:
       with:
           components: rust-src
 
+    - name: Install bpf-linker
+      run: cargo install bpf-linker
     - name: Build eBPF
       run: cargo build --manifest-path phage-agent/phage-agent-ebpf/Cargo.toml --target bpfel-unknown-none -Z build-std=core --release
     - name: Build eBPF builder
