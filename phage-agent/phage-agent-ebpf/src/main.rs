@@ -50,15 +50,7 @@ fn try_sys_enter_write(ctx: TracePointContext) -> Result<i32, i32> {
     let clean_bytes = &comm[..len];
 
     let comm_str = unsafe { core::str::from_utf8_unchecked(clean_bytes) };
-    if comm_str != "tokio-rt-worker"
-        && comm_str != "tokio-runtime-w"
-        && comm_str != "sshd"
-        && comm_str != "DefaultDispatch"
-        && comm_str != "sudo"
-        && !comm_str.starts_with("Flush:Tcp")
-    {
-        info!(&ctx, "PID: {}, Write Action from: {}", pid, comm_str);
-    }
+    if !data_helpers::is_blacklisted(comm_str) { info!(&ctx, "PID: {}, Write Action from: {}", pid, comm_str); }
     Ok(0)
 }
 
@@ -82,7 +74,7 @@ fn try_sys_enter_openat(ctx: TracePointContext) -> Result<i32, i32> {
         if let Ok(path_bytes) = unsafe { bpf_probe_read_user_str_bytes(filename_ptr, &mut path_buf) } {
             let path_str = unsafe { core::str::from_utf8_unchecked(path_bytes) };
 
-            if comm_str != "DefaultDispatch" {
+            if !data_helpers::is_blacklisted(comm_str) {
                 info!(&ctx, "PID: {}, Open: {}, File: {}", pid, comm_str, path_str);
             }
         }
