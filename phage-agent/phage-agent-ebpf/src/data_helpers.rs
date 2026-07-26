@@ -11,3 +11,37 @@ pub fn get_process_info() -> Result<(u32, [u8; 16]), i32> {
         Err(-1)
     }
 }
+
+#[inline(always)]
+pub fn is_blacklisted(string: &str) -> bool {
+    match string {
+        "phage-agent"
+        | "sudo"
+        | "sshd"
+        | "avahi-daemon"
+        | "plymouthd"
+        | "systemd-oomd"
+        | "systemd-journal"
+        | "rtkit-daemon"
+        | "DefaultDispatch"
+        | "tr"
+        | "cat"
+        | "locale"
+        | "locale-check"
+        | "jspawnhelper"
+        | "ps"
+        | "JVMResponsivene"  => return true,
+        _ => {}
+    }
+
+    if string.starts_with("Flush:Tcp")
+        || string.starts_with("tokio-")
+        || string.starts_with("Scheduler for")
+        || string.starts_with("atcher-worker")
+        || string.starts_with("tcher-worker")
+        || string.starts_with("remote-dev-")
+    {
+        return true;
+    }
+    return false
+}

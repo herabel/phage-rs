@@ -47,6 +47,10 @@ async fn main() -> anyhow::Result<()> {
         ("sys_enter_execve", "syscalls", "sys_enter_execve"),
         ("sys_enter_write", "syscalls", "sys_enter_write"),
         ("sys_enter_openat", "syscalls", "sys_enter_openat"),
+        ("sys_enter_unlinkat", "syscalls", "sys_enter_unlinkat"),
+        ("sys_enter_connect", "syscalls", "sys_enter_connect"),
+        ("sys_enter_bind", "syscalls", "sys_enter_bind"),
+        ("sys_enter_accept", "syscalls", "sys_enter_accept"),
     ];
 
     for (prog_name, category, syscall_name) in targets {
