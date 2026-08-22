@@ -51,6 +51,10 @@ async fn main() -> anyhow::Result<()> {
         ("sys_enter_connect", "syscalls", "sys_enter_connect"),
         ("sys_enter_bind", "syscalls", "sys_enter_bind"),
         ("sys_enter_accept", "syscalls", "sys_enter_accept"),
+        ("sys_enter_init_module", "syscalls", "sys_enter_init_module"),
+        ("sys_enter_finit_module", "syscalls", "sys_enter_finit_module"),
+        ("sys_enter_chmod", "syscalls", "sys_enter_chmod"),
+        ("sys_enter_fchmodat", "syscalls", "sys_enter_fchmodat"),
     ];
 
     for (prog_name, category, syscall_name) in targets {
