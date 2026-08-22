@@ -178,6 +178,42 @@ fn try_sys_enter_accept(ctx: TracePointContext) -> Result<i32, i32> {
 // Dangerous
 //////////////////////////////////////////////////////////////////////////
 
+#[tracepoint(category = "syscalls", name = "sys_enter_init_module")]
+pub fn sys_enter_init_module(ctx: TracePointContext) -> i32 {
+    try_sys_enter_init_module(ctx).unwrap_or_else(|ret| ret)
+}
+
+fn try_sys_enter_init_module(ctx: TracePointContext) -> Result<i32, i32> {
+    let (pid, comm) = data_helpers::get_process_info().unwrap_or((0, [0u8; 16]));
+    let mut len = 0;
+    while len < comm.len() && comm[len] != 0 {
+        len += 1;
+    }
+    let comm_str = unsafe { core::str::from_utf8_unchecked(&comm[..len]) };
+    if !data_helpers::is_blacklisted(comm_str) {
+        info!(&ctx, "ALERT: Kernel Module Load (sys_enter_init_module) from PID: {}, Process: {}", pid, comm_str);
+    }
+    Ok(0)
+}
+
+#[tracepoint(category = "syscalls", name = "sys_enter_finit_module")]
+pub fn sys_enter_finit_module(ctx: TracePointContext) -> i32 {
+    try_sys_enter_finit_module(ctx).unwrap_or_else(|ret| ret)
+}
+
+fn try_sys_enter_finit_module(ctx: TracePointContext) -> Result<i32, i32> {
+    let (pid, comm) = data_helpers::get_process_info().unwrap_or((0, [0u8; 16]));
+    let mut len = 0;
+    while len < comm.len() && comm[len] != 0 {
+        len += 1;
+    }
+    let comm_str = unsafe { core::str::from_utf8_unchecked(&comm[..len]) };
+    if !data_helpers::is_blacklisted(comm_str) {
+        info!(&ctx, "\nALERT: Kernel Module Load (sys_enter_init_module) from PID: {}, Process: {}\n", pid, comm_str);
+    }
+    Ok(0)
+}
+
 
 
 #[cfg(not(test))]
