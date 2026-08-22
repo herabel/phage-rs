@@ -214,7 +214,61 @@ fn try_sys_enter_finit_module(ctx: TracePointContext) -> Result<i32, i32> {
     Ok(0)
 }
 
+#[tracepoint(category = "syscalls", name = "sys_enter_chmod")]
+pub fn sys_enter_chmod(ctx: TracePointContext) -> i32 {
+    try_sys_enter_chmod(ctx).unwrap_or_else(|ret| ret)
+}
 
+fn try_sys_enter_chmod(ctx: TracePointContext) -> Result<i32, i32> {
+    let (pid, comm) = data_helpers::get_process_info().unwrap_or((0, [0u8; 16]));
+
+    let mut len = 0;
+    while len < comm.len() && comm[len] != 0 {
+        len += 1;
+    }
+    let comm_str = unsafe { core::str::from_utf8_unchecked(&comm[..len]) };
+
+    if let Ok(filename_ptr) = unsafe { ctx.read_at::<*const u8>(16) } {
+        let mut path_buf = [0u8; 128];
+
+        if let Ok(path_bytes) = unsafe { bpf_probe_read_user_str_bytes(filename_ptr, &mut path_buf) } {
+            let path_str = unsafe { core::str::from_utf8_unchecked(path_bytes) };
+
+            if !data_helpers::is_blacklisted(comm_str) {
+                info!(&ctx, "PID: {}, Chmod: {}, File: {}", pid, comm_str, path_str);
+            }
+        }
+    }
+    Ok(0)
+}
+
+#[tracepoint(category = "syscalls", name = "sys_enter_fchmodat")]
+pub fn sys_enter_fchmodat(ctx: TracePointContext) -> i32 {
+    try_sys_enter_fchmodat(ctx).unwrap_or_else(|ret| ret)
+}
+
+fn try_sys_enter_fchmodat(ctx: TracePointContext) -> Result<i32, i32> {
+    let (pid, comm) = data_helpers::get_process_info().unwrap_or((0, [0u8; 16]));
+
+    let mut len = 0;
+    while len < comm.len() && comm[len] != 0 {
+        len += 1;
+    }
+    let comm_str = unsafe { core::str::from_utf8_unchecked(&comm[..len]) };
+
+    if let Ok(filename_ptr) = unsafe { ctx.read_at::<*const u8>(24) } {
+        let mut path_buf = [0u8; 128];
+
+        if let Ok(path_bytes) = unsafe { bpf_probe_read_user_str_bytes(filename_ptr, &mut path_buf) } {
+            let path_str = unsafe { core::str::from_utf8_unchecked(path_bytes) };
+
+            if !data_helpers::is_blacklisted(comm_str) {
+                info!(&ctx, "PID: {}, Chmod: {}, File: {}", pid, comm_str, path_str);
+            }
+        }
+    }
+    Ok(0)
+}
 
 #[cfg(not(test))]
 #[panic_handler]
