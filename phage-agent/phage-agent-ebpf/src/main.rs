@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+
 use aya_ebpf::{
     macros::tracepoint,
     programs::TracePointContext,
@@ -34,6 +35,7 @@ fn try_sys_enter_execve(ctx: TracePointContext) -> Result<i32, i32> {
             info!(&ctx, "PID: {}, Executed: {}, File: {}", pid, comm_str, path_str);
         }
     }
+
     Ok(0)
 }
 
