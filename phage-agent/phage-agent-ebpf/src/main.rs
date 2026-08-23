@@ -287,6 +287,7 @@ fn try_sys_enter_fchmodat(ctx: TracePointContext) -> Result<i32, i32> {
     Ok(0)
 }
 
+#[cfg(target_arch = "bpf")] // for building project directly on host architecture
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
