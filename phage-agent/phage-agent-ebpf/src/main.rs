@@ -13,6 +13,9 @@ use phage_agent_common::SyscallEvent;
 
 mod data_helpers;
 
+#[map]
+static RING_BUF: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 256KB ring buffer
+
 // Files
 //////////////////////////////////////////////////////////////////////////
 
@@ -28,15 +31,23 @@ fn try_sys_enter_execve(ctx: TracePointContext) -> Result<i32, i32> {
     while len < comm.len() && comm[len] != 0 {
         len += 1;
     }
-    let comm_str = unsafe { core::str::from_utf8_unchecked(&comm[..len]) };
 
     if let Ok(filename_ptr) = unsafe { ctx.read_at::<*const u8>(16) } {
-        let mut path_buf = [0u8; 128];
+        let syscall_id: u32 = unsafe { ctx.read_at::<i32>(8).unwrap_or(0) as u32 };
 
-        if let Ok(path_bytes) = unsafe { bpf_probe_read_user_str_bytes(filename_ptr, &mut path_buf) } {
-            let path_str = unsafe { core::str::from_utf8_unchecked(path_bytes) };
+        let mut event = SyscallEvent::zeroed();
+        event.pid = pid;
+        event.uid = aya_ebpf::helpers::bpf_get_current_uid_gid() as u32;
+        event.syscall_id = syscall_id;
+        event.comm = comm;
 
-            info!(&ctx, "PID: {}, Executed: {}, File: {}", pid, comm_str, path_str);
+
+        if let Ok(path_bytes) = unsafe { bpf_probe_read_user_str_bytes(filename_ptr, &mut event.filename) } {
+            event.filename_len = path_bytes.len() as u32;
+            if let Some(mut entry) = RING_BUF.reserve::<SyscallEvent>(0) {
+                entry.write(event);
+                entry.submit(0);
+            }
         }
     }
 
