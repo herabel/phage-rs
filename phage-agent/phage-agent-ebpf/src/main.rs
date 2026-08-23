@@ -4,9 +4,13 @@
 use aya_ebpf::{
     macros::tracepoint,
     programs::TracePointContext,
+    maps::RingBuf,
 };
 use aya_ebpf::helpers::bpf_probe_read_user_str_bytes;
+use aya_ebpf::macros::map;
 use aya_log_ebpf::info;
+use phage_agent_common::SyscallEvent;
+
 mod data_helpers;
 
 // Files
