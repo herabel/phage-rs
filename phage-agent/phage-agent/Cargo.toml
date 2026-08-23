@@ -41,3 +41,4 @@ phage-agent-ebpf = { path = "../phage-agent-ebpf" }
 [[bin]]
 name = "phage-agent"
 path = "src/main.rs"
+doc = false
