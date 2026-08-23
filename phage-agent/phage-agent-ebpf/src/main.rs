@@ -1,12 +1,20 @@
 #![no_std]
 #![no_main]
+
 use aya_ebpf::{
     macros::tracepoint,
     programs::TracePointContext,
+    maps::RingBuf,
 };
 use aya_ebpf::helpers::bpf_probe_read_user_str_bytes;
+use aya_ebpf::macros::map;
 use aya_log_ebpf::info;
+use phage_agent_common::SyscallEvent;
+
 mod data_helpers;
+
+#[map]
+static RING_BUF: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 256KB ring buffer
 
 // Files
 //////////////////////////////////////////////////////////////////////////
@@ -23,17 +31,26 @@ fn try_sys_enter_execve(ctx: TracePointContext) -> Result<i32, i32> {
     while len < comm.len() && comm[len] != 0 {
         len += 1;
     }
-    let comm_str = unsafe { core::str::from_utf8_unchecked(&comm[..len]) };
 
     if let Ok(filename_ptr) = unsafe { ctx.read_at::<*const u8>(16) } {
-        let mut path_buf = [0u8; 128];
+        let syscall_id: u32 = unsafe { ctx.read_at::<i32>(8).unwrap_or(0) as u32 };
 
-        if let Ok(path_bytes) = unsafe { bpf_probe_read_user_str_bytes(filename_ptr, &mut path_buf) } {
-            let path_str = unsafe { core::str::from_utf8_unchecked(path_bytes) };
+        let mut event = SyscallEvent::zeroed();
+        event.pid = pid;
+        event.uid = aya_ebpf::helpers::bpf_get_current_uid_gid() as u32;
+        event.syscall_id = syscall_id;
+        event.comm = comm;
 
-            info!(&ctx, "PID: {}, Executed: {}, File: {}", pid, comm_str, path_str);
+
+        if let Ok(path_bytes) = unsafe { bpf_probe_read_user_str_bytes(filename_ptr, &mut event.filename) } {
+            event.filename_len = path_bytes.len() as u32;
+            if let Some(mut entry) = RING_BUF.reserve::<SyscallEvent>(0) {
+                entry.write(event);
+                entry.submit(0);
+            }
         }
     }
+
     Ok(0)
 }
 
@@ -178,8 +195,99 @@ fn try_sys_enter_accept(ctx: TracePointContext) -> Result<i32, i32> {
 // Dangerous
 //////////////////////////////////////////////////////////////////////////
 
+#[tracepoint(category = "syscalls", name = "sys_enter_init_module")]
+pub fn sys_enter_init_module(ctx: TracePointContext) -> i32 {
+    try_sys_enter_init_module(ctx).unwrap_or_else(|ret| ret)
+}
 
+fn try_sys_enter_init_module(ctx: TracePointContext) -> Result<i32, i32> {
+    let (pid, comm) = data_helpers::get_process_info().unwrap_or((0, [0u8; 16]));
+    let mut len = 0;
+    while len < comm.len() && comm[len] != 0 {
+        len += 1;
+    }
+    let comm_str = unsafe { core::str::from_utf8_unchecked(&comm[..len]) };
+    if !data_helpers::is_blacklisted(comm_str) {
+        info!(&ctx, "ALERT: Kernel Module Load (sys_enter_init_module) from PID: {}, Process: {}", pid, comm_str);
+    }
+    Ok(0)
+}
 
+#[tracepoint(category = "syscalls", name = "sys_enter_finit_module")]
+pub fn sys_enter_finit_module(ctx: TracePointContext) -> i32 {
+    try_sys_enter_finit_module(ctx).unwrap_or_else(|ret| ret)
+}
+
+fn try_sys_enter_finit_module(ctx: TracePointContext) -> Result<i32, i32> {
+    let (pid, comm) = data_helpers::get_process_info().unwrap_or((0, [0u8; 16]));
+    let mut len = 0;
+    while len < comm.len() && comm[len] != 0 {
+        len += 1;
+    }
+    let comm_str = unsafe { core::str::from_utf8_unchecked(&comm[..len]) };
+    if !data_helpers::is_blacklisted(comm_str) {
+        info!(&ctx, "\nALERT: Kernel Module Load (sys_enter_init_module) from PID: {}, Process: {}\n", pid, comm_str);
+    }
+    Ok(0)
+}
+
+#[tracepoint(category = "syscalls", name = "sys_enter_chmod")]
+pub fn sys_enter_chmod(ctx: TracePointContext) -> i32 {
+    try_sys_enter_chmod(ctx).unwrap_or_else(|ret| ret)
+}
+
+fn try_sys_enter_chmod(ctx: TracePointContext) -> Result<i32, i32> {
+    let (pid, comm) = data_helpers::get_process_info().unwrap_or((0, [0u8; 16]));
+
+    let mut len = 0;
+    while len < comm.len() && comm[len] != 0 {
+        len += 1;
+    }
+    let comm_str = unsafe { core::str::from_utf8_unchecked(&comm[..len]) };
+
+    if let Ok(filename_ptr) = unsafe { ctx.read_at::<*const u8>(16) } {
+        let mut path_buf = [0u8; 128];
+
+        if let Ok(path_bytes) = unsafe { bpf_probe_read_user_str_bytes(filename_ptr, &mut path_buf) } {
+            let path_str = unsafe { core::str::from_utf8_unchecked(path_bytes) };
+
+            if !data_helpers::is_blacklisted(comm_str) {
+                info!(&ctx, "PID: {}, Chmod: {}, File: {}", pid, comm_str, path_str);
+            }
+        }
+    }
+    Ok(0)
+}
+
+#[tracepoint(category = "syscalls", name = "sys_enter_fchmodat")]
+pub fn sys_enter_fchmodat(ctx: TracePointContext) -> i32 {
+    try_sys_enter_fchmodat(ctx).unwrap_or_else(|ret| ret)
+}
+
+fn try_sys_enter_fchmodat(ctx: TracePointContext) -> Result<i32, i32> {
+    let (pid, comm) = data_helpers::get_process_info().unwrap_or((0, [0u8; 16]));
+
+    let mut len = 0;
+    while len < comm.len() && comm[len] != 0 {
+        len += 1;
+    }
+    let comm_str = unsafe { core::str::from_utf8_unchecked(&comm[..len]) };
+
+    if let Ok(filename_ptr) = unsafe { ctx.read_at::<*const u8>(24) } {
+        let mut path_buf = [0u8; 128];
+
+        if let Ok(path_bytes) = unsafe { bpf_probe_read_user_str_bytes(filename_ptr, &mut path_buf) } {
+            let path_str = unsafe { core::str::from_utf8_unchecked(path_bytes) };
+
+            if !data_helpers::is_blacklisted(comm_str) {
+                info!(&ctx, "PID: {}, Chmod: {}, File: {}", pid, comm_str, path_str);
+            }
+        }
+    }
+    Ok(0)
+}
+
+#[cfg(target_arch = "bpf")] // for building project directly on host architecture
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {

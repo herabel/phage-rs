@@ -51,6 +51,10 @@ async fn main() -> anyhow::Result<()> {
         ("sys_enter_connect", "syscalls", "sys_enter_connect"),
         ("sys_enter_bind", "syscalls", "sys_enter_bind"),
         ("sys_enter_accept", "syscalls", "sys_enter_accept"),
+        ("sys_enter_init_module", "syscalls", "sys_enter_init_module"),
+        ("sys_enter_finit_module", "syscalls", "sys_enter_finit_module"),
+        ("sys_enter_chmod", "syscalls", "sys_enter_chmod"),
+        ("sys_enter_fchmodat", "syscalls", "sys_enter_fchmodat"),
     ];
 
     for (prog_name, category, syscall_name) in targets {
@@ -63,6 +67,34 @@ async fn main() -> anyhow::Result<()> {
         program.attach(category, syscall_name)?;
         println!("Successfully attached tracepoint: {}", syscall_name);
     }
+
+    let ring_buf = aya::maps::RingBuf::try_from(
+        ebpf.take_map("RING_BUF").ok_or_else(|| anyhow::anyhow!("RING_BUF not found"))?
+    )?;
+    let mut async_ring_buf = tokio::io::unix::AsyncFd::new(ring_buf)?;
+    tokio::task::spawn(async move {
+        loop {
+            let mut guard = match async_ring_buf.readable_mut().await {
+                Ok(guard) => guard,
+                Err(e) => {
+                    eprintln!("Error waiting on ringbuf: {e}");
+                    break;
+                }
+            };
+            let ring_buf = guard.get_inner_mut();
+            while let Some(item) = ring_buf.next() {
+                let event = unsafe { &*(item.as_ptr() as *const phage_agent_common::SyscallEvent) };
+                let path = std::str::from_utf8(event.filename_bytes()).unwrap_or("<invalid utf8>");
+
+                println!(
+                    "[EVENT] PID: {} | UID: {} | Syscall: {} | Path: {}",
+                    event.pid, event.uid, event.syscall_id, path
+                );
+            }
+            guard.clear_ready();
+        }
+    });
+
     println!("All targets attached. Waiting for Ctrl-C...");
     signal::ctrl_c().await?;
     println!("Exiting...");
