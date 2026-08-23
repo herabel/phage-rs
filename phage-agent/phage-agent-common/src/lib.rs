@@ -29,6 +29,11 @@ impl SyscallEvent {
             filename_len: 0,
         }
     }
+
+    pub fn filename_bytes(&self) -> &[u8] {
+        let len = (self.filename_len as usize).min(self.filename.len());
+        &self.filename[..len]
+    }
 }
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for SyscallEvent {}
