@@ -27,26 +27,25 @@ pub fn sys_enter_execve(ctx: TracePointContext) -> i32 {
 fn try_sys_enter_execve(ctx: TracePointContext) -> Result<i32, i32> {
     let (pid, comm) = data_helpers::get_process_info().unwrap_or((0, [0u8; 16]));
 
-    let mut len = 0;
-    while len < comm.len() && comm[len] != 0 {
-        len += 1;
-    }
-
     if let Ok(filename_ptr) = unsafe { ctx.read_at::<*const u8>(16) } {
         let syscall_id: u32 = unsafe { ctx.read_at::<i32>(8).unwrap_or(0) as u32 };
+        if let Some(mut entry) = RING_BUF.reserve::<SyscallEvent>(0) {
+            let event = entry.as_mut_ptr();
+            unsafe {
+                (*event).pid = pid;
+                (*event).uid = aya_ebpf::helpers::bpf_get_current_uid_gid() as u32;
+                (*event).syscall_id = syscall_id;
+                (*event).comm = comm;
 
-        let mut event = SyscallEvent::zeroed();
-        event.pid = pid;
-        event.uid = aya_ebpf::helpers::bpf_get_current_uid_gid() as u32;
-        event.syscall_id = syscall_id;
-        event.comm = comm;
 
-
-        if let Ok(path_bytes) = unsafe { bpf_probe_read_user_str_bytes(filename_ptr, &mut event.filename) } {
-            event.filename_len = path_bytes.len() as u32;
-            if let Some(mut entry) = RING_BUF.reserve::<SyscallEvent>(0) {
-                entry.write(event);
-                entry.submit(0);
+                if let Ok(path_bytes) = bpf_probe_read_user_str_bytes(
+                    filename_ptr, &mut (*event).filename
+                ) {
+                    (*event).filename_len = path_bytes.len() as u32;
+                    entry.submit(0);
+                } else {
+                    entry.discard(0);
+                }
             }
         }
     }
