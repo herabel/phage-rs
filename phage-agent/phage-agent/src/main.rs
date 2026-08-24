@@ -1,6 +1,13 @@
+mod hasher;
+mod cache;
+
 #[rustfmt::skip]
 use log::{debug, warn};
 use tokio::signal;
+use crate::cache::{FileCache};
+
+
+
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
