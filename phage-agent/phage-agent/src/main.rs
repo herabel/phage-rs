@@ -80,6 +80,7 @@ async fn main() -> anyhow::Result<()> {
     )?;
     let mut async_ring_buf = tokio::io::unix::AsyncFd::new(ring_buf)?;
     tokio::task::spawn(async move {
+        let mut cache = FileCache::new(10_000);
         loop {
             let mut guard = match async_ring_buf.readable_mut().await {
                 Ok(guard) => guard,
@@ -89,14 +90,22 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
             let ring_buf = guard.get_inner_mut();
+            let start = std::time::Instant::now();
             while let Some(item) = ring_buf.next() {
                 let event = unsafe { &*(item.as_ptr() as *const phage_agent_common::SyscallEvent) };
-                let path = std::str::from_utf8(event.filename_bytes()).unwrap_or("<invalid utf8>");
+                let path_str = std::str::from_utf8(event.filename_bytes()).unwrap_or("<invalid utf8>");
+                let path = std::path::Path::new(path_str);
 
-                println!(
-                    "[EVENT] PID: {} | UID: {} | Syscall: {} | Path: {}",
-                    event.pid, event.uid, event.syscall_id, path
-                );
+                let start = std::time::Instant::now();
+                if let Ok((file_hash, is_hit)) = FileCache::get_or_hash(&mut cache, path){
+                    let elapsed = start.elapsed();
+                    let hex_hash = blake3::Hash::from_bytes(file_hash).to_hex();
+                    let tag = if is_hit { "🟢 [CACHE HIT]" } else { "🔴 [CACHE MISS]" };
+                    println!(
+                        "{} PID: {} | ELP: {:>6?} | UID: {} | Syscall: {} | Path: {} | blake3: {}",
+                        tag, event.pid, elapsed, event.uid, event.syscall_id, path_str, hex_hash
+                    );
+                }
             }
             guard.clear_ready();
         }
