@@ -9,6 +9,8 @@ pub struct SyscallEvent {
     pub comm: [u8; 16],        // Process name (16 bytes is a limit of Linux comm)
     pub filename: [u8; 256],   // Path
     pub filename_len: u32,
+    pub args: [u8; 256],
+    pub args_len: u32,
 }
 
 impl SyscallEvent {
@@ -27,6 +29,8 @@ impl SyscallEvent {
             comm: [0;16],
             filename: [0;256],
             filename_len: 0,
+            args: [0;256],
+            args_len: 0,
         }
     }
 
