@@ -12,7 +12,13 @@ pub fn evaluate(event: &SyscallEvent) -> Decision {
     let comm_end = event.comm.iter().position(|&c| c == 0).unwrap_or(event.comm.len());
     let comm = std::str::from_utf8(&event.comm[..comm_end]).unwrap_or("<invalid utf8>");
 
-    let let_is_web_server = comm.starts_with("nginx") || comm.starts_with("apache") || comm.starts_with("caddy");
+    let let_is_web_server = comm.starts_with("nginx")
+        || comm.starts_with("apache")
+        || comm.starts_with("caddy")
+        || event.uid == 33 // debian/ubuntu
+        || event.uid == 48 // rhel/centos
+        || event.uid == 65534 // nobody
+        || event.uid == 99; // nobody, but arch/rhel
     let is_shell = path.ends_with("/sh") || path.ends_with("/bash") || path.ends_with("/dash");
     if let_is_web_server && is_shell {
         return Decision::Deny{
