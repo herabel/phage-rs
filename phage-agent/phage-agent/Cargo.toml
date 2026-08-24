@@ -19,7 +19,9 @@ tokio = { workspace = true, features = [
     "rt-multi-thread",
     "net",
     "signal",
-] }
+]}
+blake3 = "1.8.7"
+lru = "0.18.2"
 [build-dependencies]
 anyhow = { workspace = true }
 aya-build = { workspace = true }
