@@ -38,6 +38,19 @@ impl SyscallEvent {
         let len = (self.filename_len as usize).min(self.filename.len());
         &self.filename[..len]
     }
+
+    pub fn args_bytes(&self) -> &[u8] {
+        let len = (self.args_len as usize).min(self.args.len());
+        &self.args[..len]
+    }
+
+    pub fn filename_str(&self) -> &str {
+        str::from_utf8(self.filename_bytes()).unwrap_or("<invalid utf8>")
+    }
+
+    pub fn args_str(&self) -> &str {
+        str::from_utf8(self.args_bytes()).unwrap_or("<invalid utf8>")
+    }
 }
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for SyscallEvent {}
