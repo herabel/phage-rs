@@ -1,5 +1,6 @@
 mod hasher;
 mod cache;
+mod detector;
 
 #[rustfmt::skip]
 use log::{debug, warn};
@@ -96,15 +97,29 @@ async fn main() -> anyhow::Result<()> {
                 let path_str = std::str::from_utf8(event.filename_bytes()).unwrap_or("<invalid utf8>");
                 let path = std::path::Path::new(path_str);
 
+                let args_str = std::str::from_utf8(event.args_bytes()).unwrap_or("<invalid utf8>");
+
                 let start = std::time::Instant::now();
-                if let Ok((file_hash, is_hit)) = FileCache::get_or_hash(&mut cache, path){
-                    let elapsed = start.elapsed();
-                    let hex_hash = blake3::Hash::from_bytes(file_hash).to_hex();
-                    let tag = if is_hit { "🟢 [CACHE HIT]" } else { "🔴 [CACHE MISS]" };
-                    println!(
-                        "{} PID: {} | ELP: {:>6?} | UID: {} | Syscall: {} | Path: {} | blake3: {}",
-                        tag, event.pid, elapsed, event.uid, event.syscall_id, path_str, hex_hash
-                    );
+
+                match detector::evaluate(event) {
+                    detector::Decision::Deny {reason} => {
+                        unsafe {
+                            libc::kill(event.pid as i32, libc::SIGKILL);
+                        }
+                        println!("🔴🔴🔴 [THREAT DETECTED & KILLED] PID: {} | File: {} | Reason: {} 🔴🔴🔴",
+                        event.pid, path_str, reason );
+                    }
+                    detector::Decision::Allow => {
+                        if let Ok((file_hash, is_hit)) = FileCache::get_or_hash(&mut cache, path){
+                        let elapsed = start.elapsed();
+                        let hex_hash = blake3::Hash::from_bytes(file_hash).to_hex();
+                        let tag = if is_hit { "🟢 [CACHE HIT]" } else { "🔴 [CACHE MISS]" };
+                        println!(
+                        "{} PID: {} | ELP: {:>6?} | UID: {} | Syscall: {} | Path: {} | Args: {} | blake3: {}",
+                        tag, event.pid, elapsed, event.uid, event.syscall_id, path_str, args_str, hex_hash
+                        );
+                        }
+                    }
                 }
             }
             guard.clear_ready();
