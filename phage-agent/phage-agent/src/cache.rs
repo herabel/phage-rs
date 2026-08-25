@@ -6,6 +6,7 @@ use lru::LruCache;
 use crate::hasher;
 use std::os::unix::fs::MetadataExt;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone)]
 struct CacheEntry {
     pub hash: [u8;32],
@@ -53,5 +54,26 @@ impl FileCache {
 
     pub fn invalidate(&mut self, path: &Path) {
         self.inner.pop(path);
+    }
+
+    pub fn save_to_file(&self, path: &str) -> std::io::Result<()> {
+        let entries: Vec<(&PathBuf, &CacheEntry)> = self.inner.iter().collect();
+
+        if let Ok(bytes) = postcard::to_stdvec(&entries) {
+            std::fs::write(path, bytes)?;
+        }
+        Ok(())
+    }
+
+    pub fn new_or_load(path: &str, capacity: usize) -> FileCache {
+        let mut cache = FileCache::new(capacity);
+        if let Ok(bytes) = std::fs::read(path) {
+            if let Ok(entries) = postcard::from_bytes::<Vec<(PathBuf, CacheEntry)>>(&bytes) {
+                for (p, entry) in entries {
+                    cache.inner.put(p, entry);
+                }
+            }
+        }
+        cache
     }
 }

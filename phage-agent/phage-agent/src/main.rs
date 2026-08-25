@@ -1,6 +1,7 @@
 mod hasher;
 mod cache;
 mod detector;
+mod scanner;
 
 #[rustfmt::skip]
 use log::{debug, warn};
@@ -8,10 +9,27 @@ use tokio::signal;
 use crate::cache::{FileCache};
 use aya::maps::Array;
 use phage_agent_common::EventPayload;
+use std::env::args;
+
+pub const CACHE_PATH: &str = "/var/cache/phage_cache.bin";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
+
+    let args = args().collect::<Vec<_>>();
+
+    if args.get(1).map(|s| s.as_str()) == Some("scan") {
+        let mut cache = FileCache::new_or_load(CACHE_PATH, 150_000);
+        let directory = args.get(2).map(|s| s.as_str()).unwrap_or(".");
+        let output = scanner::scan_directory(&args, directory, &mut cache).await?;
+        println!(
+            "[SCAN COMPLETE] Scanned: {} | Cached: {} | Elapsed: {:?} | Threats: {}",
+            output.files_scanned, output.cache_hits, output.elapsed, output.threats
+        );
+        cache.save_to_file(CACHE_PATH)?;
+        return Ok(());
+    }
 
     // Bump the memlock rlimit. This is needed for older kernels that don't use the
     // new memcg based accounting, see https://lwn.net/Articles/837122/
@@ -83,66 +101,86 @@ async fn main() -> anyhow::Result<()> {
         ebpf.take_map("RING_BUF").ok_or_else(|| anyhow::anyhow!("RING_BUF not found"))?
     )?;
     let mut async_ring_buf = tokio::io::unix::AsyncFd::new(ring_buf)?;
-    tokio::task::spawn(async move {
-        let mut cache = FileCache::new(10_000);
-        loop {
-            let mut guard = match async_ring_buf.readable_mut().await {
-                Ok(guard) => guard,
-                Err(e) => {
-                    eprintln!("Error waiting on ringbuf: {e}");
-                    break;
-                }
-            };
-            let ring_buf = guard.get_inner_mut();
-            while let Some(item) = ring_buf.next() {
-                let event = unsafe { &*(item.as_ptr() as *const phage_agent_common::SyscallEvent) };
+    let mut cache = FileCache::new_or_load(CACHE_PATH, 150_000);
+    println!("All targets attached. Waiting for Ctrl-C...");
 
-                let start = std::time::Instant::now();
+    loop {
+        tokio::select! {
+            _ = signal::ctrl_c() => {
+                println!("\nExiting and saving cache...");
+                let _ = cache.save_to_file(CACHE_PATH);
+                break;
+            },
 
-                match event.payload {
-                    EventPayload::Execve(ref exec) => {
-                        let args_str = exec.args_str();
-                        let path_str = exec.filename_str();
-                        let path = std::path::Path::new(path_str);
+            _guard_res = async_ring_buf.readable_mut() => {
+                let mut guard = match async_ring_buf.readable_mut().await {
+                    Ok(guard) => guard,
+                    Err(e) => {
+                        eprintln!("Error waiting on ringbuf: {e}");
+                        break;
+                    }
+                };
+                let ring_buf = guard.get_inner_mut();
+                while let Some(item) = ring_buf.next() {
+                    let event = unsafe { &*(item.as_ptr() as *const phage_agent_common::SyscallEvent) };
 
-                        match detector::evaluate(*event) {
-                            detector::Decision::Deny {reason} => {
-                                unsafe {
-                                    libc::kill(event.header.pid as i32, libc::SIGKILL);
-                                }
-                                let elapsed = start.elapsed();
-                                println!("🔴🔴🔴 [THREAT DETECTED & KILLED in {:>6?}] PID: {} | File: {} | Reason: {} 🔴🔴🔴",
-                                         elapsed, event.header.pid, path_str, reason );
-                            }
-                            detector::Decision::Allow => {
-                                if let Ok((file_hash, is_hit)) = FileCache::get_or_hash(&mut cache, path){
+                    let start = std::time::Instant::now();
+
+                    match event.payload {
+                        EventPayload::Execve(ref exec) => {
+                            let args_str = exec.args_str();
+                            let path_str = exec.filename_str();
+                            let path = std::path::Path::new(path_str);
+
+                            match detector::evaluate(*event) {
+                                detector::Decision::Deny {reason} => {
+                                    unsafe {
+                                        libc::kill(event.header.pid as i32, libc::SIGKILL);
+                                    }
                                     let elapsed = start.elapsed();
-                                    let hex_hash = blake3::Hash::from_bytes(file_hash).to_hex();
-                                    let tag = if is_hit { "🟢 [CACHE HIT]" } else { "🔴 [CACHE MISS]" };
-                                    println!(
-                                        "{} PID: {} | ELP: {:>6?} | UID: {} | Syscall: execve (59) | Path: {} | Args: {} | blake3: {}",
-                                        tag, event.header.pid, elapsed, event.header.uid, path_str, args_str, hex_hash
-                                    );
+                                    println!("🔴🔴🔴 [THREAT DETECTED & KILLED in {:>6?}] PID: {} | File: {} | Reason: {} 🔴🔴🔴",
+                                             elapsed, event.header.pid, path_str, reason );
+                                }
+                                detector::Decision::Allow => {
+                                    if let Ok((file_hash, is_hit)) = FileCache::get_or_hash(&mut cache, path){
+                                        let elapsed = start.elapsed();
+                                        let hex_hash = blake3::Hash::from_bytes(file_hash).to_hex();
+                                        let tag = if is_hit { "🟢 [CACHE HIT]" } else { "🔴 [CACHE MISS]" };
+                                        println!(
+                                            "{} PID: {} | ELP: {:>6?} | UID: {} | Syscall: execve (59) | Path: {} | Args: {} | blake3: {}",
+                                            tag, event.header.pid, elapsed, event.header.uid, path_str, args_str, hex_hash
+                                        );
+                                    }
                                 }
                             }
                         }
+                        EventPayload::Openat(openat) => {
+                            let comm_str = event.header.comm_str();
+                            if let Some(path_str) = event.payload.filename_str(){
+                                match detector::evaluate(*event) {
+                                    detector::Decision::Deny {reason} => {
+                                        unsafe {
+                                            libc::kill(event.header.pid as i32, libc::SIGKILL);
+                                        }
+                                        let elapsed = start.elapsed();
+                                        println!("🔴🔴🔴 [THREAT DETECTED & KILLED in {:>6?}] PID: {} | File: {} | Reason: {} 🔴🔴🔴",
+                                                 elapsed, event.header.pid, path_str, reason );
+                                    }
+                                    detector::Decision::Allow => {
+                                        if let Some(filename_str) = event.payload.filename_str() {
+                                            println!("📝 [FILE WRITE] PID: {} | UID: {} | Syscall: openat (1) | Path: {} | Process: {}", event.header.pid, event.header.uid, filename_str, comm_str);
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
                     }
-                    EventPayload::Openat(..) => {
-                        let comm_str = event.header.comm_str();
-                        if let Some(filename_str) = event.payload.filename_str() {
-                            println!("📝 [FILE WRITE] PID: {} | UID: {} | Syscall: openat (1) | Path: {} | Process: {}", event.header.pid, event.header.uid, filename_str, comm_str);
-                        };
-                    }
-                    _ => {}
                 }
+                guard.clear_ready();
             }
-            guard.clear_ready();
         }
-    });
-
-    println!("All targets attached. Waiting for Ctrl-C...");
-    signal::ctrl_c().await?;
-    println!("Exiting...");
+    }
 
     Ok(())
 }
