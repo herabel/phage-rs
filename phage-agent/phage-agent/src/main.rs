@@ -6,9 +6,8 @@ mod detector;
 use log::{debug, warn};
 use tokio::signal;
 use crate::cache::{FileCache};
-
-
-
+use aya::maps::Array;
+use phage_agent_common::EventPayload;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -53,7 +52,6 @@ async fn main() -> anyhow::Result<()> {
 
     let targets = vec![
         ("sys_enter_execve", "syscalls", "sys_enter_execve"),
-        ("sys_enter_write", "syscalls", "sys_enter_write"),
         ("sys_enter_openat", "syscalls", "sys_enter_openat"),
         ("sys_enter_unlinkat", "syscalls", "sys_enter_unlinkat"),
         ("sys_enter_connect", "syscalls", "sys_enter_connect"),
@@ -76,6 +74,11 @@ async fn main() -> anyhow::Result<()> {
         println!("Successfully attached tracepoint: {}", syscall_name);
     }
 
+    let mut self_pid_map: Array<_, u32> = Array::try_from(ebpf.map_mut("SELF_PID").expect("SELF_PID map not found"))?;
+    let current_pid = std::process::id();
+    self_pid_map.set(0, current_pid, 0)?;
+    println!("Registered Agent Self-PID: {} in kernel map", current_pid);
+
     let ring_buf = aya::maps::RingBuf::try_from(
         ebpf.take_map("RING_BUF").ok_or_else(|| anyhow::anyhow!("RING_BUF not found"))?
     )?;
@@ -91,35 +94,46 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
             let ring_buf = guard.get_inner_mut();
-            let start = std::time::Instant::now();
             while let Some(item) = ring_buf.next() {
                 let event = unsafe { &*(item.as_ptr() as *const phage_agent_common::SyscallEvent) };
-                let path_str = std::str::from_utf8(event.filename_bytes()).unwrap_or("<invalid utf8>");
-                let path = std::path::Path::new(path_str);
-
-                let args_str = std::str::from_utf8(event.args_bytes()).unwrap_or("<invalid utf8>");
 
                 let start = std::time::Instant::now();
 
-                match detector::evaluate(event) {
-                    detector::Decision::Deny {reason} => {
-                        unsafe {
-                            libc::kill(event.pid as i32, libc::SIGKILL);
+                match event.payload {
+                    EventPayload::Execve(ref exec) => {
+                        let args_str = exec.args_str();
+                        let path_str = exec.filename_str();
+                        let path = std::path::Path::new(path_str);
+
+                        match detector::evaluate(*event) {
+                            detector::Decision::Deny {reason} => {
+                                unsafe {
+                                    libc::kill(event.header.pid as i32, libc::SIGKILL);
+                                }
+                                let elapsed = start.elapsed();
+                                println!("🔴🔴🔴 [THREAT DETECTED & KILLED in {:>6?}] PID: {} | File: {} | Reason: {} 🔴🔴🔴",
+                                         elapsed, event.header.pid, path_str, reason );
+                            }
+                            detector::Decision::Allow => {
+                                if let Ok((file_hash, is_hit)) = FileCache::get_or_hash(&mut cache, path){
+                                    let elapsed = start.elapsed();
+                                    let hex_hash = blake3::Hash::from_bytes(file_hash).to_hex();
+                                    let tag = if is_hit { "🟢 [CACHE HIT]" } else { "🔴 [CACHE MISS]" };
+                                    println!(
+                                        "{} PID: {} | ELP: {:>6?} | UID: {} | Syscall: execve (59) | Path: {} | Args: {} | blake3: {}",
+                                        tag, event.header.pid, elapsed, event.header.uid, path_str, args_str, hex_hash
+                                    );
+                                }
+                            }
                         }
-                        println!("🔴🔴🔴 [THREAT DETECTED & KILLED] PID: {} | File: {} | Reason: {} 🔴🔴🔴",
-                        event.pid, path_str, reason );
                     }
-                    detector::Decision::Allow => {
-                        if let Ok((file_hash, is_hit)) = FileCache::get_or_hash(&mut cache, path){
-                        let elapsed = start.elapsed();
-                        let hex_hash = blake3::Hash::from_bytes(file_hash).to_hex();
-                        let tag = if is_hit { "🟢 [CACHE HIT]" } else { "🔴 [CACHE MISS]" };
-                        println!(
-                        "{} PID: {} | ELP: {:>6?} | UID: {} | Syscall: {} | Path: {} | Args: {} | blake3: {}",
-                        tag, event.pid, elapsed, event.uid, event.syscall_id, path_str, args_str, hex_hash
-                        );
-                        }
+                    EventPayload::Openat(..) => {
+                        let comm_str = event.header.comm_str();
+                        if let Some(filename_str) = event.payload.filename_str() {
+                            println!("📝 [FILE WRITE] PID: {} | UID: {} | Syscall: openat (1) | Path: {} | Process: {}", event.header.pid, event.header.uid, filename_str, comm_str);
+                        };
                     }
+                    _ => {}
                 }
             }
             guard.clear_ready();
